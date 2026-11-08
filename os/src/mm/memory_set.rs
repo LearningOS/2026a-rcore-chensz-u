@@ -242,7 +242,10 @@ impl MemorySet {
             return None;
         }
         let pte = self.translate(va.floor())?;
-        if !pte.flags().contains(PTEFlags::V | PTEFlags::U | permission) {
+        let flags = pte.flags();
+        if !flags.contains(PTEFlags::V | PTEFlags::U | permission)
+            || (flags.contains(PTEFlags::W) && !flags.contains(PTEFlags::R))
+        {
             return None;
         }
         Some((pte.ppn().0 * PAGE_SIZE + va.page_offset()) as *mut u8)
@@ -263,11 +266,8 @@ impl MemorySet {
             return false;
         }
 
-        let mut flags = PTEFlags::from_bits(((prot << 1) as u8) | PTEFlags::U.bits()).unwrap();
-        // Sv39 reserves the leaf encoding with W set and R clear.
-        if flags.contains(PTEFlags::W) {
-            flags.insert(PTEFlags::R);
-        }
+        // Keep the requested bits: Sv39 must fault on W=1, R=0.
+        let flags = PTEFlags::from_bits(((prot << 1) as u8) | PTEFlags::U.bits()).unwrap();
         for vpn in pages {
             if let Some(frame) = frame_alloc() {
                 if self.page_table.try_map(vpn, frame.ppn, flags).is_some() {
