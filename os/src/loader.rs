@@ -60,6 +60,12 @@ pub fn get_app_data_by_name(name: &str) -> Option<&'static [u8]> {
         .find(|&i| APP_NAMES[i] == name)
         .map(get_app_data)
 }
+
+/// Maximum byte length of a name in the embedded application table.
+pub fn max_app_name_len() -> usize {
+    APP_NAMES.iter().map(|name| name.len()).max().unwrap_or(0)
+}
+
 ///list all apps
 pub fn list_apps() {
     println!("/**** APPS ****");

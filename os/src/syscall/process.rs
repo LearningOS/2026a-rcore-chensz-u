@@ -1,13 +1,15 @@
 //! Process management syscalls
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 
 use crate::{
-    loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    loader::{get_app_data_by_name, max_app_name_len},
+    mm::{translated_refmut, PTEFlags},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next,
+        add_task, current_task, exit_current_and_run_next, suspend_current_and_run_next,
+        TaskControlBlock,
     },
+    timer::get_time_us,
 };
 
 #[repr(C)]
@@ -53,10 +55,8 @@ pub fn sys_fork() -> isize {
 
 pub fn sys_exec(path: *const u8) -> isize {
     trace!("kernel:pid[{}] sys_exec", current_task().unwrap().pid.0);
-    let token = current_user_token();
-    let path = translated_str(token, path);
-    if let Some(data) = get_app_data_by_name(path.as_str()) {
-        let task = current_task().unwrap();
+    let task = current_task().unwrap();
+    if let Some(data) = app_from_user_path(&task, path) {
         task.exec(data);
         0
     } else {
@@ -64,10 +64,29 @@ pub fn sys_exec(path: *const u8) -> isize {
     }
 }
 
+fn app_from_user_path(task: &TaskControlBlock, path: *const u8) -> Option<&'static [u8]> {
+    let inner = task.inner_exclusive_access();
+    let mut name = Vec::new();
+    for offset in 0..=max_app_name_len() {
+        let address = (path as usize).checked_add(offset)?;
+        let byte = inner.memory_set.user_byte(address, PTEFlags::R)?;
+        let byte = unsafe { byte.read() };
+        if byte == 0 {
+            return get_app_data_by_name(core::str::from_utf8(&name).ok()?);
+        }
+        name.push(byte);
+    }
+    None
+}
+
 /// If there is not a child process whose pid is same as given, return -1.
 /// Else if there is a child process but it is still running, return -2.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
-    trace!("kernel::pid[{}] sys_waitpid [{}]", current_task().unwrap().pid.0, pid);
+    trace!(
+        "kernel::pid[{}] sys_waitpid [{}]",
+        current_task().unwrap().pid.0,
+        pid
+    );
     let task = current_task().unwrap();
     // find a child process
 
@@ -102,33 +121,51 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     // ---- release current PCB automatically
 }
 
-/// YOUR JOB: get time with second and microsecond
-/// HINT: You might reimplement it with virtual memory management.
-/// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// Write the current time into a user buffer, including buffers that cross pages.
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    let us = get_time_us();
+    let values = [us / 1_000_000, us % 1_000_000];
+    let task = current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    let mut destinations = [core::ptr::null_mut(); core::mem::size_of::<TimeVal>()];
+    for (offset, dst) in destinations.iter_mut().enumerate() {
+        let Some(address) = (ts as usize).checked_add(offset) else {
+            return -1;
+        };
+        let Some(ptr) = inner.memory_set.user_byte(address, PTEFlags::W) else {
+            return -1;
+        };
+        *dst = ptr;
+    }
+    for (dst, byte) in destinations
+        .into_iter()
+        .zip(values.into_iter().flat_map(usize::to_ne_bytes))
+    {
+        unsafe { dst.write(byte) };
+    }
+    0
 }
 
-/// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// Map anonymous user memory in the current process.
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if inner.memory_set.map_anonymous(start, len, prot) {
+        0
+    } else {
+        -1
+    }
 }
 
-/// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// Unmap anonymous user memory in the current process.
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if inner.memory_set.unmap_anonymous(start, len) {
+        0
+    } else {
+        -1
+    }
 }
 
 /// change data segment size
@@ -141,21 +178,23 @@ pub fn sys_sbrk(size: i32) -> isize {
     }
 }
 
-/// YOUR JOB: Implement spawn.
-/// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// Create and schedule a child that runs the named application.
+pub fn sys_spawn(path: *const u8) -> isize {
+    let parent = current_task().unwrap();
+    let Some(data) = app_from_user_path(&parent, path) else {
+        return -1;
+    };
+    let child = parent.spawn(data);
+    let pid = child.getpid();
+    add_task(child);
+    pid as isize
 }
 
-// YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// Set the scheduling priority of the current process.
+pub fn sys_set_priority(prio: isize) -> isize {
+    if prio < 2 {
+        return -1;
+    }
+    current_task().unwrap().inner_exclusive_access().priority = prio as u64;
+    prio
 }

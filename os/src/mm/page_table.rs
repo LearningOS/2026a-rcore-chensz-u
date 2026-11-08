@@ -1,6 +1,5 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
-use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
@@ -99,7 +98,7 @@ impl PageTable {
                 break;
             }
             if !pte.is_valid() {
-                let frame = frame_alloc().unwrap();
+                let frame = frame_alloc()?;
                 *pte = PageTableEntry::new(frame.ppn, PTEFlags::V);
                 self.frames.push(frame);
             }
@@ -128,9 +127,18 @@ impl PageTable {
     /// set the map between virtual page number and physical page number
     #[allow(unused)]
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
-        let pte = self.find_pte_create(vpn).unwrap();
-        assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
+        self.try_map(vpn, ppn, flags)
+            .expect("cannot map kernel or ELF page");
+    }
+
+    /// Install a leaf mapping, reporting a conflict or page-table allocation failure.
+    pub fn try_map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) -> Option<()> {
+        let pte = self.find_pte_create(vpn)?;
+        if pte.is_valid() {
+            return None;
+        }
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
+        Some(())
     }
     /// remove the map between virtual page number and physical page number
     #[allow(unused)]
@@ -183,25 +191,6 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     v
 }
 
-/// Translate&Copy a ptr[u8] array end with `\0` to a `String` Vec through page table
-pub fn translated_str(token: usize, ptr: *const u8) -> String {
-    let page_table = PageTable::from_token(token);
-    let mut string = String::new();
-    let mut va = ptr as usize;
-    loop {
-        let ch: u8 = *(page_table
-            .translate_va(VirtAddr::from(va))
-            .unwrap()
-            .get_mut());
-        if ch == 0 {
-            break;
-        } else {
-            string.push(ch as char);
-            va += 1;
-        }
-    }
-    string
-}
 /// Translate a ptr[u8] array through page table and return a mutable reference of T
 pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
     //trace!("into translated_refmut!");
