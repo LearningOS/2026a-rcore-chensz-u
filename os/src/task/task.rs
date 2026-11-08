@@ -22,6 +22,10 @@ impl TaskControlBlock {
     pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
         self.inner.exclusive_access()
     }
+    pub(crate) fn tid(&self) -> usize {
+        self.inner_exclusive_access().res.as_ref().unwrap().tid
+    }
+
     /// Get the address of app's page table
     pub fn get_user_token(&self) -> usize {
         let process = self.process.upgrade().unwrap();

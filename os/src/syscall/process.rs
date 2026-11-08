@@ -1,6 +1,9 @@
 use crate::{
     fs::{open_file, OpenFlags},
-    mm::{translated_ref, translated_refmut, translated_str},
+    mm::{
+        translated_byte_buffer, translated_ref, translated_refmut, translated_str, PTEFlags,
+        PageTable, VirtAddr,
+    },
     task::{
         current_process, current_task, current_user_token, exit_current_and_run_next, pid2process,
         suspend_current_and_run_next, SignalFlags,
@@ -146,17 +149,39 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
     }
 }
 
-/// get_time syscall
-///
-/// YOUR JOB: get time with second and microsecond
-/// HINT: You might reimplement it with virtual memory management.
-/// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().process.upgrade().unwrap().getpid()
-    );
-    -1
+/// Return the current time as seconds and microseconds.
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    let start = ts as usize;
+    let len = core::mem::size_of::<TimeVal>();
+    let Some(end) = start.checked_add(len - 1) else {
+        return -1;
+    };
+    let token = current_user_token();
+    let table = PageTable::from_token(token);
+    let writable = |addr| {
+        let va = VirtAddr::from(addr);
+        usize::from(va) == addr
+            && table.translate(va.floor()).is_some_and(|pte| {
+                pte.flags()
+                    .contains(PTEFlags::V | PTEFlags::U | PTEFlags::W)
+            })
+    };
+    if ts.is_null() || !writable(start) || !writable(end) {
+        return -1;
+    }
+
+    let us = crate::timer::get_time_us();
+    let mut bytes = [0; core::mem::size_of::<TimeVal>()];
+    let word_size = core::mem::size_of::<usize>();
+    bytes[..word_size].copy_from_slice(&(us / 1_000_000).to_ne_bytes());
+    bytes[word_size..].copy_from_slice(&(us % 1_000_000).to_ne_bytes());
+
+    let mut offset = 0;
+    for chunk in translated_byte_buffer(token, ts.cast(), len) {
+        chunk.copy_from_slice(&bytes[offset..offset + chunk.len()]);
+        offset += chunk.len();
+    }
+    0
 }
 
 /// mmap syscall

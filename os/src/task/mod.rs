@@ -81,6 +81,11 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     let mut task_inner = task.inner_exclusive_access();
     let process = task.process.upgrade().unwrap();
     let tid = task_inner.res.as_ref().unwrap().tid;
+    {
+        let mut inner = process.inner_exclusive_access();
+        inner.mutex_resources.thread_exited(tid);
+        inner.semaphore_resources.thread_exited(tid);
+    }
     // record exit code
     task_inner.exit_code = Some(exit_code);
     task_inner.res = None;

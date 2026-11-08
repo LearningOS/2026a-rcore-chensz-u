@@ -3,6 +3,8 @@
 mod condvar;
 mod mutex;
 mod semaphore;
+
+pub(crate) mod deadlock;
 mod up;
 
 pub use condvar::Condvar;
