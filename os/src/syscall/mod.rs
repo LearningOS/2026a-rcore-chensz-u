@@ -83,7 +83,6 @@ pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
     }
 }
 
-// Validate all destination bytes before writing, including page crossings.
 fn copy_to_user<const N: usize>(dst: *mut u8, bytes: &[u8; N]) -> isize {
     let task = crate::task::current_task().unwrap();
     let inner = task.inner_exclusive_access();

@@ -5,7 +5,6 @@ use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use lazy_static::*;
 
-// At least one unit of progress even for the largest allowed priority.
 const BIG_STRIDE: u64 = 1 << 63;
 
 ///A array of `TaskControlBlock` that is thread-safe
@@ -13,7 +12,6 @@ pub struct TaskManager {
     ready_queue: VecDeque<Arc<TaskControlBlock>>,
 }
 
-/// Stride scheduler with FIFO tie-breaking.
 impl TaskManager {
     ///Creat an empty TaskManager
     pub fn new() -> Self {
