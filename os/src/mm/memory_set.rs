@@ -309,7 +309,6 @@ impl MemorySet {
             return false;
         }
 
-        // Keep the requested bits: Sv39 must fault on W=1, R=0.
         let flags = PTEFlags::from_bits(((prot << 1) as u8) | PTEFlags::U.bits()).unwrap();
         for vpn in pages {
             if let Some(frame) = frame_alloc() {
