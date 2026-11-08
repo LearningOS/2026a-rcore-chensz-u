@@ -1,6 +1,5 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-/// Per-process resource accounting for one kind of synchronization primitive.
 #[derive(Default)]
 pub(crate) struct ResourceTable {
     available: Vec<usize>,
@@ -26,7 +25,6 @@ impl ResourceTable {
     fn can_finish(&self) -> bool {
         let mut work = self.available.clone();
         let mut waiting = self.requests.clone();
-        // Threads without an outstanding request can already make progress.
         for (&(tid, id), &count) in &self.allocations {
             if !waiting.contains_key(&tid) {
                 work[id] += count;
@@ -45,7 +43,6 @@ impl ResourceTable {
     }
 
     pub(crate) fn acquire(&mut self, tid: usize) {
-        // A thread receiving a direct handoff has already been accounted for.
         if let Some(id) = self.requests.remove(&tid) {
             self.available[id] -= 1;
             *self.allocations.entry((tid, id)).or_default() += 1;
@@ -54,7 +51,6 @@ impl ResourceTable {
 
     pub(crate) fn release(&mut self, tid: usize, id: usize, next: Option<usize>, mutex: bool) {
         if mutex {
-            // The existing mutex API permits unlocking from a different thread.
             self.allocations.retain(|&(_, resource), _| resource != id);
             self.available[id] = 1;
         } else {
@@ -72,7 +68,6 @@ impl ResourceTable {
     }
 
     pub(crate) fn thread_exited(&mut self, tid: usize) {
-        // Exiting cannot release resources on behalf of the application.
         self.allocations.retain(|&(owner, _), _| owner != tid);
         self.requests.remove(&tid);
     }

@@ -295,7 +295,6 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
         return -1;
     }
     condvar.wait();
-    // A condition wait must return with the lock held.
     lock_mutex(mutex_id, false)
 }
 /// enable deadlock detection syscall
