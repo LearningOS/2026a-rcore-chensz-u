@@ -8,7 +8,7 @@ const EFS_MAGIC: u32 = 0x3b800001;
 /// The max number of direct inodes
 const INODE_DIRECT_COUNT: usize = 28;
 /// The max length of inode name
-const NAME_LENGTH_LIMIT: usize = 27;
+pub const NAME_LENGTH_LIMIT: usize = 27;
 /// The max number of indirect1 inodes
 const INODE_INDIRECT1_COUNT: usize = BLOCK_SZ / 4;
 /// The max number of indirect2 inodes
@@ -17,9 +17,8 @@ const INODE_INDIRECT2_COUNT: usize = INODE_INDIRECT1_COUNT * INODE_INDIRECT1_COU
 const DIRECT_BOUND: usize = INODE_DIRECT_COUNT;
 /// The upper bound of indirect1 inode index
 const INDIRECT1_BOUND: usize = DIRECT_BOUND + INODE_INDIRECT1_COUNT;
-/// The upper bound of indirect2 inode indexs
-#[allow(unused)]
-const INDIRECT2_BOUND: usize = INDIRECT1_BOUND + INODE_INDIRECT2_COUNT;
+/// The upper bound of indirect2 inode indexes
+pub(crate) const INDIRECT2_BOUND: usize = INDIRECT1_BOUND + INODE_INDIRECT2_COUNT;
 /// Super block of a filesystem
 #[repr(C)]
 pub struct SuperBlock {

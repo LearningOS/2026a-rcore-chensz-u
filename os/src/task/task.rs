@@ -11,6 +11,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
 
+const DEFAULT_PRIORITY: u64 = 16;
+
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -51,6 +53,12 @@ pub struct TaskControlBlockInner {
 
     /// Maintain the execution status of the current process
     pub task_status: TaskStatus,
+
+    /// Cumulative scheduler progress.
+    pub stride: u128,
+
+    /// Scheduling weight, always at least two.
+    pub priority: u64,
 
     /// Application address space
     pub memory_set: MemorySet,
@@ -98,8 +106,6 @@ impl TaskControlBlockInner {
 
 impl TaskControlBlock {
     /// Create a new process
-    ///
-    /// At present, it is only used for the creation of initproc
     pub fn new(elf_data: &[u8]) -> Self {
         // memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
@@ -121,6 +127,8 @@ impl TaskControlBlock {
                     base_size: user_sp,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
                     task_status: TaskStatus::Ready,
+                    stride: 0,
+                    priority: DEFAULT_PRIORITY,
                     memory_set,
                     parent: None,
                     children: Vec::new(),
@@ -150,6 +158,19 @@ impl TaskControlBlock {
         task_control_block
     }
 
+    /// Create a child directly from its executable image.
+    pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Arc<Self> {
+        let child = Arc::new(Self::new(elf_data));
+        let mut parent = self.inner_exclusive_access();
+        {
+            let mut inner = child.inner_exclusive_access();
+            inner.parent = Some(Arc::downgrade(self));
+            inner.fd_table = parent.fd_table.clone();
+        }
+        parent.children.push(child.clone());
+        child
+    }
+
     /// Load a new elf to replace the original application address space and start execution
     pub fn exec(&self, elf_data: &[u8]) {
         // memory_set with elf program headers/trampoline/trap context/user stack
@@ -165,6 +186,9 @@ impl TaskControlBlock {
         inner.memory_set = memory_set;
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
+        inner.base_size = user_sp;
+        inner.heap_bottom = user_sp;
+        inner.program_brk = user_sp;
         // initialize trap_cx
         let trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -209,6 +233,8 @@ impl TaskControlBlock {
                     base_size: parent_inner.base_size,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
                     task_status: TaskStatus::Ready,
+                    stride: 0,
+                    priority: DEFAULT_PRIORITY,
                     memory_set,
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),

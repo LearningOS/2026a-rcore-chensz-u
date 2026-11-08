@@ -3,6 +3,7 @@ use super::{
     SuperBlock,
 };
 use crate::BLOCK_SZ;
+use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use spin::Mutex;
 ///An easy file system on block
@@ -15,6 +16,13 @@ pub struct EasyFileSystem {
     pub data_bitmap: Bitmap,
     inode_area_start_block: u32,
     data_area_start_block: u32,
+    data_area_blocks: u32,
+    pub(crate) open_inodes: BTreeMap<u32, OpenInode>,
+}
+
+pub(crate) struct OpenInode {
+    pub handles: usize,
+    pub unlinked: bool,
 }
 
 type DataBlock = [u8; BLOCK_SZ];
@@ -45,6 +53,8 @@ impl EasyFileSystem {
             data_bitmap,
             inode_area_start_block: 1 + inode_bitmap_blocks,
             data_area_start_block: 1 + inode_total_blocks + data_bitmap_blocks,
+            data_area_blocks,
+            open_inodes: BTreeMap::new(),
         };
         // clear all blocks
         for i in 0..total_blocks {
@@ -71,7 +81,7 @@ impl EasyFileSystem {
         );
         // write back immediately
         // create a inode for root node "/"
-        assert_eq!(efs.alloc_inode(), 0);
+        assert_eq!(efs.alloc_inode(), Some(0));
         let (root_inode_block_id, root_inode_offset) = efs.get_disk_inode_pos(0);
         get_block_cache(root_inode_block_id as usize, Arc::clone(&block_device))
             .lock()
@@ -99,17 +109,15 @@ impl EasyFileSystem {
                     ),
                     inode_area_start_block: 1 + super_block.inode_bitmap_blocks,
                     data_area_start_block: 1 + inode_total_blocks + super_block.data_bitmap_blocks,
+                    data_area_blocks: super_block.data_area_blocks,
+                    open_inodes: BTreeMap::new(),
                 };
                 Arc::new(Mutex::new(efs))
             })
     }
     /// Get the root inode of the filesystem
     pub fn root_inode(efs: &Arc<Mutex<Self>>) -> Inode {
-        let block_device = Arc::clone(&efs.lock().block_device);
-        // acquire efs lock temporarily
-        let (block_id, block_offset) = efs.lock().get_disk_inode_pos(0);
-        // release efs lock
-        Inode::new(block_id, block_offset, Arc::clone(efs), block_device)
+        Inode::new(0, efs, &efs.lock())
     }
     /// Get inode by id
     pub fn get_disk_inode_pos(&self, inode_id: u32) -> (u32, usize) {
@@ -126,13 +134,20 @@ impl EasyFileSystem {
         self.data_area_start_block + data_block_id
     }
     /// Allocate a new inode
-    pub fn alloc_inode(&mut self) -> u32 {
-        self.inode_bitmap.alloc(&self.block_device).unwrap() as u32
+    pub fn alloc_inode(&mut self) -> Option<u32> {
+        self.inode_bitmap
+            .alloc(&self.block_device)
+            .map(|id| id as u32)
     }
 
     /// Allocate a data block
-    pub fn alloc_data(&mut self) -> u32 {
-        self.data_bitmap.alloc(&self.block_device).unwrap() as u32 + self.data_area_start_block
+    pub fn alloc_data(&mut self) -> Option<u32> {
+        let id = self.data_bitmap.alloc(&self.block_device)?;
+        if id >= self.data_area_blocks as usize {
+            self.data_bitmap.dealloc(&self.block_device, id);
+            return None;
+        }
+        Some(id as u32 + self.data_area_start_block)
     }
     /// Deallocate a data block
     pub fn dealloc_data(&mut self, block_id: u32) {

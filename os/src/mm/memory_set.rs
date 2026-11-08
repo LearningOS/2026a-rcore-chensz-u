@@ -40,6 +40,7 @@ pub fn kernel_token() -> usize {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
+    anonymous: BTreeMap<VirtPageNum, FrameTracker>,
 }
 
 impl MemorySet {
@@ -48,6 +49,7 @@ impl MemorySet {
         Self {
             page_table: PageTable::new(),
             areas: Vec::new(),
+            anonymous: BTreeMap::new(),
         }
     }
     /// Get the page table token
@@ -269,6 +271,16 @@ impl MemorySet {
                     .copy_from_slice(src_ppn.get_bytes_array());
             }
         }
+        for (&vpn, source) in &user_space.anonymous {
+            let frame = frame_alloc().unwrap();
+            frame
+                .ppn
+                .get_bytes_array()
+                .copy_from_slice(source.ppn.get_bytes_array());
+            let flags = user_space.translate(vpn).unwrap().flags();
+            memory_set.page_table.map(vpn, frame.ppn, flags);
+            memory_set.anonymous.insert(vpn, frame);
+        }
         memory_set
     }
     /// Change page table by writing satp CSR Register.
@@ -284,9 +296,77 @@ impl MemorySet {
         self.page_table.translate(vpn)
     }
 
+    /// Translate a user byte only if the leaf grants the requested access.
+    pub fn user_byte(&self, address: usize, permission: PTEFlags) -> Option<*mut u8> {
+        let va = VirtAddr::from(address);
+        if usize::from(va) != address {
+            return None;
+        }
+        let pte = self.translate(va.floor())?;
+        if !pte.flags().contains(PTEFlags::V | PTEFlags::U | permission) {
+            return None;
+        }
+        Some((pte.ppn().0 * PAGE_SIZE + va.page_offset()) as *mut u8)
+    }
+
+    /// Allocate and map anonymous user pages.
+    pub fn map_anonymous(&mut self, start: usize, len: usize, prot: usize) -> bool {
+        let Some(pages) = anonymous_pages(start, len) else {
+            return false;
+        };
+        if prot == 0 || prot & !0x7 != 0 {
+            return false;
+        }
+        if pages
+            .into_iter()
+            .any(|vpn| self.translate(vpn).is_some_and(|pte| pte.is_valid()))
+        {
+            return false;
+        }
+
+        let mut flags = PTEFlags::from_bits(((prot << 1) as u8) | PTEFlags::U.bits()).unwrap();
+        // Sv39 reserves the leaf encoding with W set and R clear.
+        if flags.contains(PTEFlags::W) {
+            flags.insert(PTEFlags::R);
+        }
+        for vpn in pages {
+            if let Some(frame) = frame_alloc() {
+                if self.page_table.try_map(vpn, frame.ppn, flags).is_some() {
+                    self.anonymous.insert(vpn, frame);
+                    continue;
+                }
+            }
+            for mapped in VPNRange::new(pages.get_start(), vpn) {
+                self.page_table.unmap(mapped);
+                self.anonymous.remove(&mapped);
+            }
+            return false;
+        }
+        true
+    }
+
+    /// Release pages previously created by an anonymous mapping.
+    pub fn unmap_anonymous(&mut self, start: usize, len: usize) -> bool {
+        let Some(pages) = anonymous_pages(start, len) else {
+            return false;
+        };
+        if pages
+            .into_iter()
+            .any(|vpn| !self.anonymous.contains_key(&vpn))
+        {
+            return false;
+        }
+        for vpn in pages {
+            self.page_table.unmap(vpn);
+            self.anonymous.remove(&vpn);
+        }
+        true
+    }
+
     ///Remove all `MapArea`
     pub fn recycle_data_pages(&mut self) {
         self.areas.clear();
+        self.anonymous.clear();
     }
 
     /// shrink the area to new_end
@@ -312,6 +392,17 @@ impl MemorySet {
             .iter_mut()
             .find(|area| area.vpn_range.get_start() == start.floor())
         {
+            if new_end.ceil() < area.vpn_range.get_end()
+                || VPNRange::new(area.vpn_range.get_end(), new_end.ceil())
+                    .into_iter()
+                    .any(|vpn| {
+                        self.page_table
+                            .translate(vpn)
+                            .is_some_and(|pte| pte.is_valid())
+                    })
+            {
+                return false;
+            }
             area.append_to(&mut self.page_table, new_end.ceil());
             true
         } else {
@@ -319,6 +410,23 @@ impl MemorySet {
         }
     }
 }
+fn anonymous_pages(start: usize, len: usize) -> Option<VPNRange> {
+    let va = VirtAddr::from(start);
+    if usize::from(va) != start || !va.aligned() {
+        return None;
+    }
+    let first = va.floor();
+    if len == 0 {
+        return Some(VPNRange::new(first, first));
+    }
+    let last = start.checked_add(len - 1)?;
+    let end_va = VirtAddr::from(last);
+    if usize::from(end_va) != last || (start ^ last) >> 63 != 0 {
+        return None;
+    }
+    Some(VPNRange::new(first, VirtPageNum(end_va.floor().0 + 1)))
+}
+
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
     vpn_range: VPNRange,

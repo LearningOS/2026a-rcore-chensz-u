@@ -82,3 +82,23 @@ pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }
+
+// Validate all destination bytes before writing, including page crossings.
+fn copy_to_user<const N: usize>(dst: *mut u8, bytes: &[u8; N]) -> isize {
+    let task = crate::task::current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    let mut destinations = [core::ptr::null_mut(); N];
+    for (offset, dest) in destinations.iter_mut().enumerate() {
+        let Some(address) = (dst as usize).checked_add(offset) else {
+            return -1;
+        };
+        let Some(ptr) = inner.memory_set.user_byte(address, crate::mm::PTEFlags::W) else {
+            return -1;
+        };
+        *dest = ptr;
+    }
+    for (dest, byte) in destinations.iter().zip(bytes) {
+        unsafe { dest.write(*byte) };
+    }
+    0
+}
