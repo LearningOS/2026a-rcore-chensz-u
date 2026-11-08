@@ -25,7 +25,6 @@ const SYSCALL_MMAP: usize = 222;
 /// trace syscall
 const SYSCALL_TRACE: usize = 410;
 
-/// Supported syscall numbers tracked separately for each task.
 pub(crate) const TRACKED_SYSCALLS: [usize; 8] = [
     SYSCALL_WRITE,
     SYSCALL_EXIT,

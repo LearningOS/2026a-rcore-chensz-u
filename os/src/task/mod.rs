@@ -203,20 +203,17 @@ pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
 }
 
-/// Count a call in the current task before dispatch.
 pub(crate) fn record_syscall(slot: usize) {
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current = inner.current_task;
     inner.tasks[current].syscall_counts[slot] += 1;
 }
 
-/// Return the current task's count for a known call slot.
 pub(crate) fn syscall_count(slot: usize) -> usize {
     let inner = TASK_MANAGER.inner.exclusive_access();
     inner.tasks[inner.current_task].syscall_counts[slot]
 }
 
-/// Run a short operation on the current task's address space.
 pub(crate) fn with_current_memory<T>(f: impl FnOnce(&mut crate::mm::MemorySet) -> T) -> T {
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current = inner.current_task;
