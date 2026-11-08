@@ -35,3 +35,7 @@ easy-fs 将 inode 0 固定为根 inode。它记录根目录的数据大小和块
 在 WSL 使用 Rust 1.85.0 执行 `cargo check`，easy-fs 库检查通过。课程固定工具链下的 QEMU 和官方检查器结果待验证。
 
 参考题目见[第六章练习](https://learningos.cn/rCore-Tutorial-Guide/chapter6/4exercise.html)和[第七章练习](https://learningos.cn/rCore-Tutorial-Guide/chapter7/3exercise.html)。
+
+## 本地验证
+
+课程检查器在 QEMU 8.2.2 下通过 31/31 项检查，要求的报告均被识别。另在本地检查了最后一个链接删除后仍有文件句柄的情况：旧句柄仍能读取，关闭最后一个句柄后 inode 可回收。

@@ -30,3 +30,7 @@ fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 ## 来源与荣誉准则
 
 本地练习的代码及报告由 Codex 生成。课程计分提交要求独立完成并如实声明。本练习材料仅供学习核对。[课程练习](https://learningos.cn/rCore-Tutorial-Guide/chapter5/4exercise.html) · [荣誉准则](https://learningos.cn/rCore-Tutorial-Guide/honorcode.html)
+
+## 本地验证
+
+课程检查器在 QEMU 8.2.2 下通过 15/15 项检查，要求的报告均被识别。六个优先级任务的 count / priority 中，最大值与最小值之比约为 1.023，低于题目要求的 1.5。
