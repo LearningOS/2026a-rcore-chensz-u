@@ -21,7 +21,6 @@ const SYSCALL_GET_TIME: usize = 169;
 /// trace syscall
 const SYSCALL_TRACE: usize = 410;
 
-/// Supported syscall numbers tracked separately for each task.
 pub(crate) const TRACKED_SYSCALLS: [usize; 5] = [
     SYSCALL_WRITE,
     SYSCALL_EXIT,

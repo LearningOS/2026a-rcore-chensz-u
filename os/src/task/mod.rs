@@ -171,14 +171,12 @@ pub fn exit_current_and_run_next() {
     run_next_task();
 }
 
-/// Count a call in the current task before dispatch.
 pub(crate) fn record_syscall(slot: usize) {
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current = inner.current_task;
     inner.tasks[current].syscall_counts[slot] += 1;
 }
 
-/// Return the current task's count for a known call slot.
 pub(crate) fn syscall_count(slot: usize) -> usize {
     let inner = TASK_MANAGER.inner.exclusive_access();
     inner.tasks[inner.current_task].syscall_counts[slot]
