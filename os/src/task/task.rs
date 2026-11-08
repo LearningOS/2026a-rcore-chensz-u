@@ -8,6 +8,7 @@ use crate::trap::{trap_handler, TrapContext};
 
 /// The task control block (TCB) of a task.
 pub struct TaskControlBlock {
+    pub(super) syscall_counts: [usize; crate::syscall::TRACKED_SYSCALLS.len()],
     /// Save task context
     pub task_cx: TaskContext,
 
@@ -56,6 +57,7 @@ impl TaskControlBlock {
             MapPermission::R | MapPermission::W,
         );
         let task_control_block = Self {
+            syscall_counts: [0; crate::syscall::TRACKED_SYSCALLS.len()],
             task_status,
             task_cx: TaskContext::goto_trap_return(kernel_stack_top),
             memory_set,
