@@ -52,6 +52,7 @@ lazy_static! {
     pub static ref TASK_MANAGER: TaskManager = {
         let num_app = get_num_app();
         let mut tasks = [TaskControlBlock {
+            syscall_counts: [0; crate::syscall::TRACKED_SYSCALLS.len()],
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
         }; MAX_APP_NUM];
@@ -168,4 +169,17 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// Count a call in the current task before dispatch.
+pub(crate) fn record_syscall(slot: usize) {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    inner.tasks[current].syscall_counts[slot] += 1;
+}
+
+/// Return the current task's count for a known call slot.
+pub(crate) fn syscall_count(slot: usize) -> usize {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    inner.tasks[inner.current_task].syscall_counts[slot]
 }

@@ -38,8 +38,15 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     0
 }
 
-// TODO: implement the syscall
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
-    trace!("kernel: sys_trace");
-    -1
+/// Read/write one byte in the flat address space, or query a syscall count.
+pub fn sys_trace(request: usize, id: usize, data: usize) -> isize {
+    match request {
+        0 => unsafe { (id as *const u8).read() as isize },
+        1 => {
+            unsafe { (id as *mut u8).write(data as u8) };
+            0
+        }
+        2 => super::trace_slot(id).map_or(0, |slot| crate::task::syscall_count(slot) as isize),
+        _ => -1,
+    }
 }
